@@ -1,3 +1,13 @@
+import torch
+import torch.nn.functional as F
+
+if torch.cuda.is_available():
+    device = torch.cuda.current_device()
+    torch.cuda.init()
+    torch.backends.cuda.matmul.allow_tf32 = True
+else:
+    raise Exception("unable to initialize CUDA")
+
 import os
 import gc
 import random
@@ -12,8 +22,6 @@ from time import perf_counter
 from glob import glob
 from PIL import Image
 
-import torch
-import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from torchvision.transforms import v2, InterpolationMode
@@ -151,7 +159,7 @@ class CombinedDataset(Dataset):
         if ext in IMAGE_TYPES:
             image = Image.open(self.media_files[idx]).convert('RGB')
             pixels = torch.as_tensor(np.array(image)).unsqueeze(0) # FHWC
-            buckets = self.get_ar_buckets(pixels.shape[1], pixels.shape[0])
+            buckets = self.get_ar_buckets(pixels.shape[2], pixels.shape[1])
             width, height = random.choice(buckets)
         else:
             vr = decord.VideoReader(self.media_files[idx])
@@ -410,13 +418,13 @@ def cache_embeddings(args):
     print("loading CLIP")
     with timer("loaded CLIP in"):
         tokenizer_clip = CLIPTokenizerFast.from_pretrained(args.pretrained_model, subfolder="tokenizer_2")
-        text_encoder_clip = CLIPTextModel.from_pretrained(args.pretrained_model, subfolder="text_encoder_2").to(device="cuda", dtype=torch.bfloat16)
+        text_encoder_clip = CLIPTextModel.from_pretrained(args.pretrained_model, subfolder="text_encoder_2").to(device=device, dtype=torch.bfloat16)
         text_encoder_clip.requires_grad_(False)
     
     print("loading Llama")
     with timer("loaded Llama in"):
         tokenizer_llama = LlamaTokenizerFast.from_pretrained(args.pretrained_model, subfolder="tokenizer")
-        text_encoder_llama = LlamaModel.from_pretrained(args.pretrained_model, subfolder="text_encoder").to(device="cuda", dtype=torch.bfloat16)
+        text_encoder_llama = LlamaModel.from_pretrained(args.pretrained_model, subfolder="text_encoder").to(device=device, dtype=torch.bfloat16)
         text_encoder_llama.requires_grad_(False)
     
     def encode_clip(prompt):
@@ -494,7 +502,6 @@ def cache_embeddings(args):
 
 
 def main(args):
-    torch.backends.cuda.matmul.allow_tf32 = True
     decord.bridge.set_bridge('torch')
     
     torch.manual_seed(args.seed)
@@ -570,7 +577,7 @@ def main(args):
     # noise_scheduler = FlowMatchEulerDiscreteScheduler.from_pretrained(args.pretrained_model, subfolder="scheduler")
     
     with timer("loaded VAE in"):
-        vae = AutoencoderKLHunyuanVideo.from_pretrained(args.pretrained_model, subfolder="vae").to(device="cuda", dtype=torch.float16)
+        vae = AutoencoderKLHunyuanVideo.from_pretrained(args.pretrained_model, subfolder="vae").to(device=device, dtype=torch.float16)
         vae.requires_grad_(False)
         vae.enable_tiling(
             tile_sample_min_height = 256,
@@ -664,7 +671,7 @@ def main(args):
     
     if args.warped_noise:
         from noise_warp.GetWarpedNoiseFromVideo import GetWarpedNoiseFromVideo
-        get_warped_noise = GetWarpedNoiseFromVideo(raft_size="large", device="cuda", dtype=torch.float32)
+        get_warped_noise = GetWarpedNoiseFromVideo(raft_size="large", device=device, dtype=torch.float32)
     
     def prepare_conditions(batch):
         pixels, clip_embed, llama_embed, llama_mask = batch
@@ -702,16 +709,16 @@ def main(args):
             noisy_model_input = torch.cat([noisy_model_input, image_cond_latents], dim=1)
         
         guidance_scale = 1.0
-        guidance = torch.tensor([guidance_scale] * latents.shape[0], dtype=torch.float32, device="cuda") * 1000.0
+        guidance = torch.tensor([guidance_scale] * latents.shape[0], dtype=torch.float32, device=device) * 1000.0
         
         return {
-            "target":            (noise - latents).to(device="cuda"),
-            "noisy_model_input": noisy_model_input.to(device="cuda", dtype=torch.bfloat16),
-            "timesteps":                 timesteps.to(device="cuda", dtype=torch.bfloat16),
-            "llama_embed":             llama_embed.to(device="cuda", dtype=torch.bfloat16),
-            "llama_mask":               llama_mask.to(device="cuda", dtype=torch.bfloat16),
-            "clip_embed":               clip_embed.to(device="cuda", dtype=torch.bfloat16),
-            "guidance":                   guidance.to(device="cuda", dtype=torch.bfloat16),
+            "target":            (noise - latents).to(device=device),
+            "noisy_model_input": noisy_model_input.to(device=device, dtype=torch.bfloat16),
+            "timesteps":                 timesteps.to(device=device, dtype=torch.bfloat16),
+            "llama_embed":             llama_embed.to(device=device, dtype=torch.bfloat16),
+            "llama_mask":               llama_mask.to(device=device, dtype=torch.bfloat16),
+            "clip_embed":               clip_embed.to(device=device, dtype=torch.bfloat16),
+            "guidance":                   guidance.to(device=device, dtype=torch.bfloat16),
         }
     
     def predict_loss(conditions):
