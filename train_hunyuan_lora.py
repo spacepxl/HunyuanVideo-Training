@@ -1,5 +1,7 @@
 import torch
 import torch.nn.functional as F
+from torch.utils.data import Dataset, DataLoader
+from torch.utils.tensorboard import SummaryWriter
 
 if torch.cuda.is_available():
     device = torch.cuda.current_device()
@@ -22,8 +24,6 @@ from time import perf_counter
 from glob import glob
 from PIL import Image
 
-from torch.utils.data import Dataset, DataLoader
-from torch.utils.tensorboard import SummaryWriter
 from torchvision.transforms import v2, InterpolationMode
 from safetensors.torch import load_file, save_file
 
